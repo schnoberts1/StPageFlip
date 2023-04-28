@@ -1,6 +1,7 @@
 import { PageCollection } from './Collection/PageCollection';
 import { ImagePageCollection } from './Collection/ImagePageCollection';
 import { HTMLPageCollection } from './Collection/HTMLPageCollection';
+import { PDFPageCollection } from './Collection/PDFPageCollection';
 import { PageRect, Point } from './BasicTypes';
 import { Flip, FlipCorner, FlippingState } from './Flip/Flip';
 import { Orientation, Render } from './Render/Render';
@@ -64,6 +65,36 @@ export class PageFlip extends EventObject {
         this.render.update();
         this.pages.show();
     }
+
+    /**
+     * Load pages from PDF on the Canvas mode
+     *
+     * @param {string[]} imagesHref - List of paths to images
+     */
+public loadFromPDF(url: string): void {
+    this.ui = new CanvasUI(this.block, this, this.setting);
+
+    const canvas = (this.ui as CanvasUI).getCanvas();
+    this.render = new CanvasRender(this, this.setting, canvas);
+
+    this.flipController = new Flip(this.render, this);
+
+    this.pages = new PDFPageCollection(this, this.render, url, 20);
+    this.pages.load();
+
+    this.render.start();
+
+    this.pages.show(this.setting.startPage);
+
+    // safari fix
+    setTimeout(() => {
+        this.ui.update();
+        this.trigger('init', this, {
+            page: this.setting.startPage,
+            mode: this.render.getOrientation(),
+        });
+    }, 1);
+}
 
     /**
      * Load pages from images on the Canvas mode
