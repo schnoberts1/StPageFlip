@@ -71,7 +71,7 @@ export class PageFlip extends EventObject {
      *
      * @param {string[]} imagesHref - List of paths to images
      */
-public loadFromPDF(url: string): void {
+public loadFromPDF(doc:any, numPages: number): void {
     this.ui = new CanvasUI(this.block, this, this.setting);
 
     const canvas = (this.ui as CanvasUI).getCanvas();
@@ -79,7 +79,7 @@ public loadFromPDF(url: string): void {
 
     this.flipController = new Flip(this.render, this);
 
-    this.pages = new PDFPageCollection(this, this.render, url, 20);
+    this.pages = new PDFPageCollection(this, this.render, doc, numPages);
     this.pages.load();
 
     this.render.start();
