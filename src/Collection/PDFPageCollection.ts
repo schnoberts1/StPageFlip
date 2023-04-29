@@ -19,6 +19,9 @@ export class PDFPageCollection extends PageCollection {
         this.numPages = numPages;
         this.pdfDoc = doc;
         this.totalPages = numPages;
+        window.addEventListener('resize', () => {
+            PDFPage.windowResized();
+        });
     }
 
     // public onProgress(progress: any)
@@ -33,7 +36,6 @@ export class PDFPageCollection extends PageCollection {
     public load() {
         for (let pageNumber = 1; pageNumber <= this.numPages; pageNumber++) {
             const page = new PDFPage(this.render, this.pdfDoc, PageDensity.SOFT, pageNumber);
-
             page.load();
             this.pages.push(page);
         }

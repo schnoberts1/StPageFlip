@@ -22,21 +22,28 @@ class CachedCanvas
  */
 class CanvasCache
 {
+    private static CACHE_SIZE:number = 10;
     private cache:CachedCanvas[] = [];
 
     constructor() {
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < CanvasCache.CACHE_SIZE; i++) {
             const canvas = document.createElement("canvas");
             canvas.id = `canvas-${i}`;
             this.cache.push(new CachedCanvas(0, canvas));
         }
     }
 
+    invalidateCache() {
+        for (var cachedCanvas of this.cache) {
+            cachedCanvas.pageNumber = 0;
+        }        
+    }
+
     getCanvas(pageNumber:number): CachedCanvas {
         // Get the canvas assigned to the page number
         // or if it doesn't exist, get the last recently
         // used one from the cache.
-        for (let i = 0; i < 6; ++i)
+        for (let i = 0; i < this.cache.length; ++i)
         {
             const cachedCanvas:CachedCanvas = this.cache[i];
             if (cachedCanvas.pageNumber == pageNumber)
@@ -71,15 +78,19 @@ export class PDFPage extends Page {
     private loadingAngle = 0;
     private loading = false;
     private readonly pageNumber: number;
-    private pdfDoc: any;
+    private readonly pdfDoc: pdfjsLib.PDFDocumentProxy;
     private pdfPage: pdfjsLib.PDFPageProxy = null;
-    private okToRender = true;
     private cachedCanvas: CachedCanvas = null;
 
     constructor(render: Render, pdfDoc: any, density: PageDensity, pageNumber: number) {
         super(render, density);
         this.pageNumber = pageNumber;
         this.pdfDoc = pdfDoc;
+    }
+
+    public static windowResized()
+    {
+        PDFPage.canvasCache.invalidateCache();
     }
   
     public draw(tempDensity?: PageDensity): void {
@@ -108,7 +119,6 @@ export class PDFPage extends Page {
             this.drawLoader(ctx, { x: 0, y: 0 }, pageWidth, pageHeight);
         } else {
             this.renderPage(0, 0, pageWidth, pageHeight, ctx);
-            //console.log(`draw: drawImage ${this.pageNumber} 0 0 ${pageHeight} ${pageWidth}`);
         }
 
         ctx.restore();
@@ -128,7 +138,6 @@ export class PDFPage extends Page {
         if (!this.isLoad) {
             this.drawLoader(ctx, { x, y }, pageWidth, pageHeight);
         } else {
-            //console.log(`simpleDraw: drawImage ${this.pageNumber} ${x} ${y} ${pageHeight} ${pageWidth}`);
             this.renderPage(x, y, pageWidth, pageHeight, ctx);
          }
     }
@@ -173,17 +182,21 @@ export class PDFPage extends Page {
     private renderPage(x: number, y: number, pageWidth: number, pageHeight: number,
                        ctx: CanvasRenderingContext2D)
     {
+        const cachedCanvas:CachedCanvas = this.getCanvasInitiatingPageRenderIfRequired(pageWidth, pageHeight);
+        if (cachedCanvas !== null)
+        {
+            ctx.drawImage(cachedCanvas.canvas, x, y);
+        }
+    }
+
+    public getCanvasInitiatingPageRenderIfRequired(pageWidth: number, pageHeight: number): CachedCanvas
+    {
         if (this.isLoad)
         {
             const cachedCanvas:CachedCanvas = PDFPage.canvasCache.getCanvas(this.pageNumber);
             if (cachedCanvas.ready)
             {
-                ctx.drawImage(cachedCanvas.canvas, x, y);
-                // ctx.fillStyle = 'green';
-                // ctx.fillRect(x, y, pageWidth, pageHeight);
-                // ctx.fillStyle = 'blue';
-                // ctx.font = '72px serif';
-                // ctx.fillText(`Page ${this.pageNumber}`, x + 100, y + pageHeight / 3);
+                return cachedCanvas;
             }
             else if (!cachedCanvas.waiting)
             {
@@ -193,34 +206,21 @@ export class PDFPage extends Page {
                 canvas.width = pageWidth;
                 canvas.height = pageHeight;
                 const canvasContext:CanvasRenderingContext2D = canvas.getContext("2d");
-                // canvasContext.fillStyle = 'purple';
-                // canvasContext.fillRect(x, y, pageWidth, pageHeight);
-                // canvasContext.font = '72px serif';
-                // canvasContext.fillText(`Page ${this.pageNumber}`, x + 100, y + pageHeight / 3);
-                
-                // DRAW PDF IMAGE INTO THIS.
-                var unscaledViewport = this.pdfPage.getViewport(1);
-                var scale = Math.min((canvas.height / unscaledViewport.height), (canvas.width / unscaledViewport.width));
-                const viewport = this.pdfPage.getViewport(scale);
 
+                var unscaledViewport = this.pdfPage.getViewport({scale: 1.0});
+                var scale = Math.min((pageHeight / unscaledViewport.height), (pageWidth / unscaledViewport.width));
                 const renderContext = {
                     canvasContext: canvasContext,
-                    viewport: viewport
+                    viewport: this.pdfPage.getViewport({scale: scale})
                 };
                 
-                console.log(`Rendering of PDF page ${this.pageNumber} initiated ${canvas.id}`); 
                 this.pdfPage.render(renderContext).promise.then(() => {
                     cachedCanvas.waiting = false;
                     cachedCanvas.ready = true;  
-                    console.log(`Rendering of PDF page ${this.pageNumber} complete`); 
                 });
-                ctx.fillStyle = 'yellow';
-                ctx.fillRect(x, y, pageWidth, pageHeight);
-                ctx.fillStyle = 'blue';
-                ctx.font = '72px serif';
-                ctx.fillText(`Page ${this.pageNumber}`, x + 100, y + pageHeight / 3);
             }
         }
+        return null;
     }
 
     // Return a promise to provide the required page
@@ -237,6 +237,7 @@ export class PDFPage extends Page {
             this.getPage(this.pageNumber).then((pdfPage: pdfjsLib.PDFPageProxy) => {
                 this.isLoad = true;
                 this.pdfPage = pdfPage;
+                const vp = pdfPage.getViewport({scale: 1.0});
             });
         }
     }
