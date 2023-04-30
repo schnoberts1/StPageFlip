@@ -21,7 +21,8 @@ class CachedCanvas
 }
 
 /**
- * Class representing a cache of canvases
+ * Class representing a cache of canvases. Canvases are cached in LRU style
+ * and when full the cache will return the oldest canvas in the cache to reuse.
  */
 class CanvasCache
 {
@@ -71,6 +72,9 @@ class CanvasCache
     }
 }
 
+/**
+ * A PDF page rendering job
+ */
 class RenderJob
 {
     public page: PDFPageProxy;
@@ -86,7 +90,8 @@ class RenderJob
 }
 
 /**
- * Render queue
+ * Queue of PDF page rendering requests. Whenver a page is queued the 
+ * current queue is drained (with async render calls).
  */
 class RenderQueue {
     constructor() {}
@@ -96,7 +101,6 @@ class RenderQueue {
     public enqueue(page: PDFPageProxy, renderContext: RenderParameters, postRenderCb: any)
     {
         this.queue.push(new RenderJob(page, renderContext, postRenderCb));
-        console.log(`Queue: ${this.job} ${this.queue.length}`);
         this.renderOne();
     }
 
@@ -104,12 +108,10 @@ class RenderQueue {
     {
         if (this.job === null && this.queue.length)
         {
-            console.log("RenderJob initiated");
             this.job = this.queue.shift();
             this.job.page.render(this.job.renderContext).promise.then(() => {
                 this.job.postRenderCb();
                 this.job = null;
-                console.log("RenderJob done");
                 this.renderOne();
             })
         }
@@ -122,21 +124,21 @@ class RenderQueue {
 export class PDFPage extends Page {
     static canvasCache: CanvasCache = new CanvasCache();
     static renderQueue: RenderQueue = new RenderQueue();
-    private isLoad = false;
 
+    private isLoaded = false;
     private loadingAngle = 0;
     private loading = false;
     private readonly pageNumber: number;
     private readonly pdfDoc: pdfjsLib.PDFDocumentProxy;
     private pdfPage: pdfjsLib.PDFPageProxy = null;
     private cachedCanvas: CachedCanvas = null;
-    private readonly renderFinishedCb:any;
+    private readonly pageFetcher:any;
 
-    constructor(render: Render, pdfDoc: any, density: PageDensity, pageNumber: number, renderFinishedCb: any) {
+    constructor(render: Render, pdfDoc: any, density: PageDensity, pageNumber: number, pageFetcher: any) {
         super(render, density);
         this.pageNumber = pageNumber;
         this.pdfDoc = pdfDoc;
-        this.renderFinishedCb = renderFinishedCb;
+        this.pageFetcher = pageFetcher;
     }
 
     public static windowResized()
@@ -144,6 +146,7 @@ export class PDFPage extends Page {
         PDFPage.canvasCache.invalidateCache();
     }
   
+    // Draws a page being turned.
     public draw(tempDensity?: PageDensity): void {
         const ctx = (this.render as CanvasRender).getContext();
 
@@ -166,7 +169,7 @@ export class PDFPage extends Page {
 
         ctx.clip();
 
-        if (!this.isLoad) {
+        if (!this.isLoaded) {
             this.drawLoader(ctx, { x: 0, y: 0 }, pageWidth, pageHeight);
         } else {
             this.renderPage(0, 0, pageWidth, pageHeight, ctx);
@@ -175,6 +178,7 @@ export class PDFPage extends Page {
         ctx.restore();
     }
 
+    // Draws a turned page
     public simpleDraw(orient: PageOrientation): void {
         const rect = this.render.getRect();
         const ctx = (this.render as CanvasRender).getContext();
@@ -186,13 +190,14 @@ export class PDFPage extends Page {
 
         const y = rect.top;
 
-        if (!this.isLoad) {
+        if (!this.isLoaded) {
             this.drawLoader(ctx, { x, y }, pageWidth, pageHeight);
         } else {
             this.renderPage(x, y, pageWidth, pageHeight, ctx);
          }
     }
 
+    // Draws a spinning loader icon
     private drawLoader(
         ctx: CanvasRenderingContext2D,
         shiftPos: Point,
@@ -230,23 +235,49 @@ export class PDFPage extends Page {
         }
     }
 
-    private renderPage(x: number, y: number, pageWidth: number, pageHeight: number,
-                       ctx: CanvasRenderingContext2D)
-    {
-        const cachedCanvas:CachedCanvas = this.getCanvasInitiatingPageRenderIfRequired(pageWidth, pageHeight);
-        if (cachedCanvas !== null)
+    // Load the PDF page
+    public load(): void {
+        if (!this.isLoaded && !this.loading)
         {
-            ctx.drawImage(cachedCanvas.canvas, x, y);
+            this.loading = true;
+
+            this.getPage(this.pageNumber).then((pdfPage: pdfjsLib.PDFPageProxy) => {
+                this.isLoaded = true;
+                this.pdfPage = pdfPage;
+            });
         }
     }
 
-    public getCanvasInitiatingPageRenderIfRequired(pageWidth: number, pageHeight: number): CachedCanvas
+    public newTemporaryCopy(): Page {
+        return this;
+    }
+
+    public getTemporaryCopy(): Page {
+        return this;
+    }
+
+    public hideTemporaryCopy(): void {
+        return;
+    }
+
+
+    ///////////////
+
+    // Return a promise to provide the required page
+    private async getPage(num: number): Promise<any> {
+        const page: any = await this.pdfDoc.getPage(num);
+        return page;
+    }
+
+    // Get a canvas with the image rendered into it or return null.
+    public getCanvasInitiatingPageRenderIfRequired(pageWidth: number, pageHeight: number, fetchAround: boolean = true): CachedCanvas
     {
-        if (this.isLoad)
+        if (this.isLoaded)
         {
             const cachedCanvas:CachedCanvas = PDFPage.canvasCache.getCanvas(this.pageNumber);
             if (cachedCanvas.ready)
             {
+                if (fetchAround) this.prepopulateCacheAroundThisPage(pageWidth, pageHeight);
                 return cachedCanvas;
             }
             else if (!cachedCanvas.waiting)
@@ -270,41 +301,41 @@ export class PDFPage extends Page {
                 PDFPage.renderQueue.enqueue(this.pdfPage, renderContext, () => {
                     cachedCanvas.waiting = false;
                     cachedCanvas.ready = true;
-                    this.renderFinishedCb(this, pageWidth, pageHeight);
                 });
+
+                if (fetchAround) this.prepopulateCacheAroundThisPage(pageWidth, pageHeight);
             }
         }
         return null;
     }
 
-    // Return a promise to provide the required page
-    async getPage(num: number): Promise<any> {
-        const page: any = await this.pdfDoc.getPage(num);
-        return page;
-    }
-
-    public load(): void {
-        if (!this.isLoad && !this.loading)
+    // Render the page to the context if there's a populated cache entry. Otherwise, don't do this
+    // draws a repeatedly called and we'll be asked again very shortly, but which time we should
+    // have cached image to return
+    private renderPage(x: number, y: number, pageWidth: number, pageHeight: number,
+        ctx: CanvasRenderingContext2D)
+    {
+        const cachedCanvas:CachedCanvas = this.getCanvasInitiatingPageRenderIfRequired(pageWidth, pageHeight);
+        if (cachedCanvas !== null)
         {
-            this.loading = true;
-
-            this.getPage(this.pageNumber).then((pdfPage: pdfjsLib.PDFPageProxy) => {
-                this.isLoad = true;
-                this.pdfPage = pdfPage;
-                const vp = pdfPage.getViewport({scale: 1.0});
-            });
+            ctx.drawImage(cachedCanvas.canvas, x, y);
         }
     }
 
-    public newTemporaryCopy(): Page {
-        return this;
+
+    // Fetch 2 pages before and two after so we're always ready to turn the next page.
+    private prepopulateCacheAroundThisPage(pageWidth: number, pageHeight: number)
+    {
+        for (var nextPage of [
+                                this.pageFetcher(this.pageNumber - 2),
+                                this.pageFetcher(this.pageNumber - 1),
+                                this.pageFetcher(this.pageNumber + 1),
+                                this.pageFetcher(this.pageNumber + 2)
+                            ]) {
+            if (nextPage) {
+                nextPage.getCanvasInitiatingPageRenderIfRequired(pageWidth, pageHeight, false);
+            }
+        }
     }
 
-    public getTemporaryCopy(): Page {
-        return this;
-    }
-
-    public hideTemporaryCopy(): void {
-        return;
-    }
 }

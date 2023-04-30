@@ -2,7 +2,7 @@ import { PDFPage } from '../Page/PDFPage';
 import { Render } from '../Render/Render';
 import { PageCollection } from './PageCollection';
 import { PageFlip } from '../PageFlip';
-import { PageDensity } from '../Page/Page';
+import { Page, PageDensity } from '../Page/Page';
 
 
 /**
@@ -12,7 +12,6 @@ export class PDFPageCollection extends PageCollection {
     private readonly numPages: number;
     private readonly pdfDoc: any;
     private readonly totalPages: any;
-
 
     constructor(app: PageFlip, render: Render, doc: any, numPages: number) {
         super(app, render);
@@ -35,9 +34,14 @@ export class PDFPageCollection extends PageCollection {
 
     public load() {
         for (let pageNumber = 1; pageNumber <= this.numPages; pageNumber++) {
-            const page = new PDFPage(this.render, this.pdfDoc, PageDensity.SOFT, pageNumber, (p: PDFPage, w: number, h: number) =>
+            const page = new PDFPage(this.render, this.pdfDoc, PageDensity.SOFT, pageNumber, (p: number):PDFPage =>
             {
-                console.log(`Render finished for page ${p}`);
+                const idx = p - 1;
+                if (idx < 0)
+                    return null;
+                if (idx >= this.numPages)
+                    return null;
+                return this.pages[idx] as PDFPage;
             });
             page.load();
             this.pages.push(page);
