@@ -142,6 +142,7 @@ export class PDFPage extends Page {
         this.pageFetcher = pageFetcher;
     }
 
+    // Don't invalidate cache until resize is done
     public static windowResized()
     {
         if (this.timeout) {
