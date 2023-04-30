@@ -122,8 +122,9 @@ class RenderQueue {
  * Class representing a book page as an image on Canvas
  */
 export class PDFPage extends Page {
-    static canvasCache: CanvasCache = new CanvasCache();
-    static renderQueue: RenderQueue = new RenderQueue();
+    private static canvasCache: CanvasCache = new CanvasCache();
+    private static renderQueue: RenderQueue = new RenderQueue();
+    private static timeout: any = null;
 
     private isLoaded = false;
     private loadingAngle = 0;
@@ -132,7 +133,7 @@ export class PDFPage extends Page {
     private readonly pdfDoc: pdfjsLib.PDFDocumentProxy;
     private pdfPage: pdfjsLib.PDFPageProxy = null;
     private cachedCanvas: CachedCanvas = null;
-    private readonly pageFetcher:any;
+    private readonly pageFetcher: any;
 
     constructor(render: Render, pdfDoc: any, density: PageDensity, pageNumber: number, pageFetcher: any) {
         super(render, density);
@@ -143,7 +144,10 @@ export class PDFPage extends Page {
 
     public static windowResized()
     {
-        PDFPage.canvasCache.invalidateCache();
+        if (this.timeout) {
+            clearTimeout(this.timeout);
+        }
+        this.timeout = setTimeout(() => { PDFPage.canvasCache.invalidateCache();}, 500);
     }
   
     // Draws a page being turned.
