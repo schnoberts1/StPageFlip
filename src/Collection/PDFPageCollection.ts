@@ -35,7 +35,10 @@ export class PDFPageCollection extends PageCollection {
 
     public load() {
         for (let pageNumber = 1; pageNumber <= this.numPages; pageNumber++) {
-            const page = new PDFPage(this.render, this.pdfDoc, PageDensity.SOFT, pageNumber);
+            const page = new PDFPage(this.render, this.pdfDoc, PageDensity.SOFT, pageNumber, (p: PDFPage, w: number, h: number) =>
+            {
+                console.log(`Render finished for page ${p}`);
+            });
             page.load();
             this.pages.push(page);
         }

@@ -3,6 +3,9 @@ import { CanvasRender } from '../Render/CanvasRender';
 import { Page, PageDensity, PageOrientation } from './Page';
 import { Render } from '../Render/Render';
 import { Point } from '../BasicTypes';
+import { PDFPageProxy } from '../../../../node_modules/pdfjs-dist/types/web/interfaces';
+import { post } from 'jquery';
+import { RenderParameters } from '../../../../node_modules/pdfjs-dist/types/src/display/api';
 
 class CachedCanvas
 {
@@ -68,11 +71,57 @@ class CanvasCache
     }
 }
 
+class RenderJob
+{
+    public page: PDFPageProxy;
+    public renderContext: RenderParameters;
+    public postRenderCb: any;
+
+    constructor(page: PDFPageProxy, renderContext: RenderParameters, postRenderCb: any)
+    {
+        this.page = page;
+        this.renderContext = renderContext;
+        this.postRenderCb = postRenderCb;
+    }
+}
+
+/**
+ * Render queue
+ */
+class RenderQueue {
+    constructor() {}
+    private queue: RenderJob[] = [];
+    private job: RenderJob = null;
+
+    public enqueue(page: PDFPageProxy, renderContext: RenderParameters, postRenderCb: any)
+    {
+        this.queue.push(new RenderJob(page, renderContext, postRenderCb));
+        console.log(`Queue: ${this.job} ${this.queue.length}`);
+        this.renderOne();
+    }
+
+    private renderOne()
+    {
+        if (this.job === null && this.queue.length)
+        {
+            console.log("RenderJob initiated");
+            this.job = this.queue.shift();
+            this.job.page.render(this.job.renderContext).promise.then(() => {
+                this.job.postRenderCb();
+                this.job = null;
+                console.log("RenderJob done");
+                this.renderOne();
+            })
+        }
+    }
+}
+
 /**
  * Class representing a book page as an image on Canvas
  */
 export class PDFPage extends Page {
     static canvasCache: CanvasCache = new CanvasCache();
+    static renderQueue: RenderQueue = new RenderQueue();
     private isLoad = false;
 
     private loadingAngle = 0;
@@ -81,11 +130,13 @@ export class PDFPage extends Page {
     private readonly pdfDoc: pdfjsLib.PDFDocumentProxy;
     private pdfPage: pdfjsLib.PDFPageProxy = null;
     private cachedCanvas: CachedCanvas = null;
+    private readonly renderFinishedCb:any;
 
-    constructor(render: Render, pdfDoc: any, density: PageDensity, pageNumber: number) {
+    constructor(render: Render, pdfDoc: any, density: PageDensity, pageNumber: number, renderFinishedCb: any) {
         super(render, density);
         this.pageNumber = pageNumber;
         this.pdfDoc = pdfDoc;
+        this.renderFinishedCb = renderFinishedCb;
     }
 
     public static windowResized()
@@ -215,10 +266,11 @@ export class PDFPage extends Page {
                     canvasContext: canvasContext,
                     viewport: this.pdfPage.getViewport({scale: scale})
                 };
-                
-                this.pdfPage.render(renderContext).promise.then(() => {
+                cachedCanvas.waiting = true;
+                PDFPage.renderQueue.enqueue(this.pdfPage, renderContext, () => {
                     cachedCanvas.waiting = false;
-                    cachedCanvas.ready = true;  
+                    cachedCanvas.ready = true;
+                    this.renderFinishedCb(this, pageWidth, pageHeight);
                 });
             }
         }
