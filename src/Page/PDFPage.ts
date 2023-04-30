@@ -208,7 +208,9 @@ export class PDFPage extends Page {
                 const canvasContext:CanvasRenderingContext2D = canvas.getContext("2d");
 
                 var unscaledViewport = this.pdfPage.getViewport({scale: 1.0});
-                var scale = Math.min((pageHeight / unscaledViewport.height), (pageWidth / unscaledViewport.width));
+                const unscaledHeight = unscaledViewport.height;
+                const unscaledWidth = unscaledViewport.width;
+                var scale = Math.min((pageHeight / unscaledHeight), (pageWidth / unscaledWidth));
                 const renderContext = {
                     canvasContext: canvasContext,
                     viewport: this.pdfPage.getViewport({scale: scale})
